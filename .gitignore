@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# midia gerada / pesada
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.m4v
+*.wav
+*.mp3
+*.m4a
+
+# saidas do pipeline
+*.srt
+*.vtt
+*.ass
+
+# configs pessoais das interfaces
+gui_config.json
+autoedit_config.json
+
+# sistema
+Thumbs.db
+desktop.ini
+*.log
