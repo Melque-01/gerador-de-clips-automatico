@@ -238,3 +238,7 @@ Burn-in re-encoda o vídeo inteiro. Faz sempre por último.
 - `--upper` combina com `-w 2`; `-w 3` em caixa alta costuma estourar a largura.
 - Se a legenda atrasar/adiantar em relação ao vídeo todo, o SRT é de outra versão
   do corte — regera a partir do arquivo certo.
+
+## Licença
+
+MIT — veja [LICENSE](LICENSE).
