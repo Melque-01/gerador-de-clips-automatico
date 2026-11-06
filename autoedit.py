@@ -628,7 +628,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-hook", dest="hook", action="store_false")
     p.add_argument("--llm-hook", action="store_true",
                    help="usa LLM pro gancho (precisa OPENAI_API_KEY)")
-    p.add_argument("--hook-dur", type=float, default=4.5,
+    p.add_argument("--hook-dur", type=float, default=10.0,
                    help="quanto tempo o gancho fica na tela (s)")
     args = p.parse_args(argv)
 

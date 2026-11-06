@@ -131,9 +131,9 @@ Como escolhe: mede, na timeline já cortada,
 Janelas de `--clip-len` segundos, passo de 3s, top N sem sobreposição. As bordas
 são encaixadas em início/fim de palavra, então o corte nunca cai no meio da frase.
 
-**Gancho**: texto no topo nos primeiros 2.6s, em caixa própria, com a legenda
-rodando embaixo. Sem LLM usa heurística (palavra-chave, número, palavra de
-impacto). Com LLM:
+**Gancho**: texto grande no topo, em 2–3 linhas, com caixa própria e a legenda
+rodando embaixo por **10s** (ajuste com `--hook-dur`). Sem LLM usa heurística
+(palavra-chave, número, palavra de impacto). Com LLM:
 
 ```powershell
 $env:OPENAI_API_KEY="sk-..."
