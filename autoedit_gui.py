@@ -167,8 +167,14 @@ class AutoEditor(tk.Tk):
         ttk.Checkbutton(chips, text="Caixa", style="Chip.TCheckbutton",
                         variable=self.box_var).pack(side="left", padx=(0, 6))
 
-        ttk.Button(card, text="Preset TikTok", style="Ghost.TButton",
-                   command=self._preset).pack(fill="x", pady=(8, 0))
+        self.hook_text_var = tk.StringVar()
+        hookrow = ttk.Frame(card, style="Card.TFrame")
+        hookrow.pack(fill="x", pady=(8, 0))
+        ttk.Label(hookrow, text="Gancho", style="Card.TLabel").pack(side="left")
+        ttk.Entry(hookrow, textvariable=self.hook_text_var).pack(
+            side="left", fill="x", expand=True, padx=(8, 8))
+        ttk.Button(hookrow, text="Preset TikTok", style="Ghost.TButton",
+                   command=self._preset).pack(side="left")
 
         # ---------------------------------------------------------- acoes
         actions = ttk.Frame(left)
@@ -277,6 +283,7 @@ class AutoEditor(tk.Tk):
         self.hook_var.set(True)
         self.llm_var.set(False)
         self.box_var.set(False)
+        self.hook_text_var.set("")
         self.status.configure(text="Preset TikTok aplicado.", foreground=MUTED)
 
     def _open_subtitles(self) -> None:
@@ -351,16 +358,20 @@ class AutoEditor(tk.Tk):
             cmd.append("--llm-hook")
         if self.box_var.get():
             cmd.append("--box")
+        hook_text = self.hook_text_var.get().strip()
+        if hook_text:
+            cmd += ["--hook-text", hook_text]
 
         self.log.delete("1.0", "end")
         self._append_log(" ".join(cmd) + "\n")
 
         creation = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         try:
+            env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
             self.proc = subprocess.Popen(
                 cmd, cwd=str(HERE), stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                errors="replace", bufsize=1, creationflags=creation,
+                errors="replace", bufsize=1, creationflags=creation, env=env,
             )
         except Exception as exc:
             messagebox.showerror("Auto-editor", f"não consegui iniciar:\n{exc}")
@@ -563,6 +574,7 @@ class AutoEditor(tk.Tk):
         self.hook_var.set(bool(cfg.get("hook", True)))
         self.llm_var.set(bool(cfg.get("llm", False)))
         self.box_var.set(bool(cfg.get("box", False)))
+        self.hook_text_var.set(str(cfg.get("hook_text", "") or ""))
 
     def _save_cfg(self) -> None:
         cfg = {
@@ -575,6 +587,7 @@ class AutoEditor(tk.Tk):
             "hook": self.hook_var.get(),
             "llm": self.llm_var.get(),
             "box": self.box_var.get(),
+            "hook_text": self.hook_text_var.get().strip(),
         }
         try:
             CONFIG.write_text(json.dumps(cfg, indent=2), encoding="utf-8")

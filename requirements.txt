@@ -1,0 +1,10 @@
+# Nucleo (Windows/Linux) - Python 3.11+
+# av 18.x e obrigatorio: av 19 quebra o faster-whisper 1.2.1
+av==18.1.0
+faster-whisper==1.2.1
+numpy>=2.0,<3
+pillow>=11,<13
+
+# Opcional: reframe com rastreio de rosto (--reframe face)
+# OpenCV 5 removeu o CascadeClassifier do Python, por isso <5
+opencv-python-headless>=4.10,<5

@@ -34,6 +34,63 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import make_srt as ms  # noqa: E402
 
 # --------------------------------------------------------------------------
+# transcricao (com cache)
+# --------------------------------------------------------------------------
+
+CACHE_VERSION = 1
+
+
+def transcript_cache_path(src: Path) -> Path:
+    return src.with_name(src.stem + ".autoedit-cache.json")
+
+
+def transcript_cache_key(src: Path, model_name: str, language: str | None) -> str:
+    st = src.stat()
+    return f"v{CACHE_VERSION}|{model_name}|{language or 'auto'}|{st.st_size}|{int(st.st_mtime)}"
+
+
+def load_cached_words(src: Path, model_name: str, language: str | None) -> list[ms.Word] | None:
+    try:
+        key = transcript_cache_key(src, model_name, language)
+        data = json.loads(transcript_cache_path(src).read_text(encoding="utf-8"))
+        if data.get("key") != key:
+            return None
+        words = [ms.Word(str(w["t"]), float(w["s"]), float(w["e"]))
+                 for w in data["words"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return words or None
+
+
+def save_cached_words(src: Path, model_name: str, language: str | None,
+                      words: list[ms.Word]) -> None:
+    try:
+        key = transcript_cache_key(src, model_name, language)
+        payload = {
+            "key": key,
+            "source": src.name,
+            "model": model_name,
+            "language": language or "auto",
+            "words": [{"t": w.text, "s": round(w.start, 3), "e": round(w.end, 3)}
+                      for w in words],
+        }
+        transcript_cache_path(src).write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def use_utf8_streams() -> None:
+    """Pipe (GUI) em UTF-8; console mantem o encoding nativo."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream is not None and not stream.isatty():
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+# --------------------------------------------------------------------------
 # estilo
 # --------------------------------------------------------------------------
 
@@ -726,7 +783,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="usa LLM pro gancho (precisa OPENAI_API_KEY)")
     p.add_argument("--hook-dur", type=float, default=10.0,
                    help="quanto tempo o gancho fica na tela (s)")
+    p.add_argument("--hook-text", default=None,
+                   help="gancho manual; use | pra separar clipes (a | b | c)")
+    p.add_argument("--no-cache", action="store_true",
+                   help="ignora o cache de transcricao e transcreve de novo")
     args = p.parse_args(argv)
+
+    use_utf8_streams()
 
     if not args.media:
         p.error("informe o video de entrada")
@@ -736,18 +799,30 @@ def main(argv: list[str] | None = None) -> int:
         sys.exit(f"arquivo nao encontrado: {src}")
     dst = Path(args.output) if args.output else src.with_name(src.stem + "_tiktok.mp4")
 
-    words = ms.transcribe(
-        media=src,
-        model_name=args.model,
-        language=None if args.lang.lower() == "auto" else args.lang,
-        device="auto",
-        compute_type="auto",
-        beam_size=5,
-        vad=True,
-        keep_punct=False,
-        upper=True,
-        merge=True,
-    )
+    language = None if args.lang.lower() == "auto" else args.lang
+
+    words = None
+    if not args.no_cache:
+        words = load_cached_words(src, args.model, language)
+        if words:
+            print(f"  transcricao em cache ({transcript_cache_path(src).name})"
+                  f" - {len(words)} palavras, pulando whisper")
+
+    if not words:
+        words = ms.transcribe(
+            media=src,
+            model_name=args.model,
+            language=language,
+            device="auto",
+            compute_type="auto",
+            beam_size=5,
+            vad=True,
+            keep_punct=False,
+            upper=True,
+            merge=True,
+        )
+        if words and not args.no_cache:
+            save_cached_words(src, args.model, language, words)
     if not words:
         sys.exit("nenhuma fala detectada - tente --keep-silence ou outro modelo")
 
@@ -823,6 +898,7 @@ def main(argv: list[str] | None = None) -> int:
               f"use --clip-len menor para mais clipes)\n")
     made: list[Path] = []
     manifest: list[dict] = []
+    manual_hooks = [part.strip() for part in (args.hook_text or "").split("|")]
 
     for idx, clip in enumerate(clips, 1):
         sub = slice_segments(segments, clip.start, clip.end)
@@ -836,7 +912,11 @@ def main(argv: list[str] | None = None) -> int:
         hook_cue = None
         hook_text = ""
         if args.hook:
-            hook_text = analyze.make_hook(clip.text, use_llm=args.llm_hook)
+            manual = manual_hooks[idx - 1] if idx - 1 < len(manual_hooks) else ""
+            if manual:
+                hook_text = manual
+            else:
+                hook_text = analyze.make_hook(clip.text, use_llm=args.llm_hook)
             if hook_text:
                 hook_cue = Cue(
                     words=[ms.Word(part, src_start, src_start + 0.01)

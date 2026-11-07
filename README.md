@@ -31,7 +31,10 @@ janela de legendas. Passo a passo:
    altura e reframe
 3. Chips: **Gancho no topo**, **Gancho com IA**, **Caixa**.
    **Preset TikTok** volta pro padrão (3 clipes de 30s, 2 palavras, crop 1080×1920)
-4. **Gerar clipes**
+4. Campo **Gancho** (opcional): escreve o texto do gancho na mão. Vale pra todos
+   os clipes; pra textos diferentes, separe com `|` (`"A | B | C"`). Vazio =
+   heurística/IA.
+5. **Gerar clipes**
 
 Enquanto roda, cada etapa aparece na barra de status; **Ver log** mostra a saída
 completa e **Cancelar** mata o processo (inclusive o ffmpeg/PyAV em curso).
@@ -58,6 +61,12 @@ O manifesto serve pra automatizar depois (montar uma timeline, subir por API,
 gerar thumbnail em lote). As opções da janela ficam em `autoedit_config.json`.
 
 ## Instalação
+
+```powershell
+pip install -r requirements.txt
+```
+
+Ou na mão:
 
 ```powershell
 pip install faster-whisper "av==18.1.0" pillow
@@ -117,10 +126,20 @@ corte e a legenda usam o mesmo mapa de tempo da fonte.
 **Reframe `face`**: detecta o rosto (Haar cascade que vem no OpenCV, sem baixar
 modelo), roda a detecção a cada 3 frames em uma miniatura de 320px e interpola o
 movimento — o crop acompanha sem tremor. Se não achar rosto nenhum, mantém o
-enquadramento central. Precisa de `pip install opencv-python-headless`; sem ele
-o modo cai no `crop` automaticamente.
+enquadramento central. Precisa de `pip install "opencv-python-headless<5"`; sem
+ele o modo cai no `crop` automaticamente.
 
 Custo: ~1,2x a duração do vídeo na CPU (20s de vídeo ≈ 25s de render).
+
+### Cache de transcrição
+
+A transcrição é salva ao lado do vídeo em `video.autoedit-cache.json`
+(palavras + timings). Rodar de novo o mesmo vídeo com o mesmo modelo pula o
+Whisper inteiro — sobra só o render.
+
+- Invalida sozinho se o vídeo mudar (tamanho/data) ou se trocar `-m` / `-l`.
+- Apagar o arquivo = transcrever de novo. `--no-cache` força isso sem apagar.
+- O arquivo é pequeno (~100 KB por 10 min de fala).
 
 ## Fase 2: escolha automática dos melhores trechos
 
@@ -130,6 +149,8 @@ python autoedit.py video.mp4 --highlights --clips 5 --clip-len 30
 python autoedit.py video.mp4 --highlights --clip-len 10 --clips 3 --min-len 6   # vídeo curto
 python autoedit.py video.mp4 --highlights --no-hook                              # sem gancho
 python autoedit.py video.mp4 --highlights --llm-hook                             # gancho via LLM
+python autoedit.py video.mp4 --highlights --hook-text "ISSO MUDOU TUDO"          # gancho escrito por você
+python autoedit.py video.mp4 --highlights --hook-text "GANCHO 1 | GANCHO 2 | GANCHO 3"
 ```
 
 Gera `video_tiktok_clip1.mp4`, `clip2.mp4`, ... e o manifesto
@@ -157,6 +178,10 @@ python autoedit.py video.mp4 --highlights --llm-hook
 
 Aceita também `OPENROUTER_API_KEY` + `OPENAI_BASE_URL`, e `AUTOEDIT_HOOK_MODEL`
 (padrão `gpt-4o-mini`). Se a chamada falhar, cai na heurística sem quebrar.
+
+Gancho manual: `--hook-text "TEXTO"` ignora heurística e LLM. Pra vários clipes,
+separe com `|` na ordem dos clipes (`"A | B | C"`); clipe sem texto volta pra
+heurística. Na interface, o campo **Gancho** faz o mesmo.
 
 Limite honesto: score não sabe o que é engraçado. Ele acha "trecho denso e
 energético". Revisão humana ainda é necessária.
