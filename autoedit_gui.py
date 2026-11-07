@@ -150,7 +150,7 @@ class AutoEditor(tk.Tk):
         ttk.Label(ref, text="Reframe", style="Card.TLabel").pack(side="left")
         ttk.Combobox(
             ref, textvariable=self.reframe_var, width=7, state="readonly",
-            values=["crop", "blur", "fit"],
+            values=["crop", "face", "blur", "fit"],
         ).pack(side="left", padx=(8, 0))
 
         chips = ttk.Frame(card, style="Card.TFrame")

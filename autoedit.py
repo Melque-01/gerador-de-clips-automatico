@@ -360,8 +360,12 @@ class CaptionPainter:
 # --------------------------------------------------------------------------
 
 
+def clamp01(v: float) -> float:
+    return min(max(v, 0.0), 1.0)
+
+
 def reframe_frame(img: Image.Image, out_w: int, out_h: int, mode: str = "crop",
-                  crop_x: float = 0.5) -> Image.Image:
+                  crop_x: float = 0.5, crop_y: float = 0.5) -> Image.Image:
     if mode == "blur":
         bg = img.resize((out_w, out_h), Image.BILINEAR).filter(
             ImageFilter.GaussianBlur(radius=max(8, out_w // 28))
@@ -381,20 +385,105 @@ def reframe_frame(img: Image.Image, out_w: int, out_h: int, mode: str = "crop",
         bg.paste(fg, (0, (out_h - fg_h) // 2))
         return bg
 
-    # crop 9:16
+    # crop 9:16 -- crop_x/crop_y sao o ponto focal (0 = esquerda/topo, 1 = direita/base)
     target_ratio = out_w / out_h
     src_ratio = img.width / img.height
     if src_ratio > target_ratio:
         crop_w = int(img.height * target_ratio)
         crop_w -= crop_w % 2
-        left = int((img.width - crop_w) * min(max(crop_x, 0.0), 1.0))
+        slack = img.width - crop_w
+        center = clamp01(crop_x) * img.width
+        left = int(min(max(center - crop_w / 2, 0), slack))
         box = (left, 0, left + crop_w, img.height)
     else:
         crop_h = int(img.width / target_ratio)
         crop_h -= crop_h % 2
-        top = int((img.height - crop_h) * 0.5)
+        slack = img.height - crop_h
+        center = clamp01(crop_y) * img.height
+        top = int(min(max(center - crop_h / 2, 0), slack))
         box = (0, top, img.width, top + crop_h)
     return img.crop(box).resize((out_w, out_h), Image.LANCZOS)
+
+
+class FaceTracker:
+    """Segue o rosto e devolve o ponto focal (0..1) suavizado, sem tremor.
+
+    Usa o Haar cascade que ja vem no OpenCV (nada pra baixar). Roda a deteccao
+    em uma versao reduzida do frame, a cada N frames, e interpola o resto.
+    Se nao achar rosto nenhum, mantem o enquadramento central.
+    """
+
+    def __init__(self, cadence: int = 3, smooth: float = 0.22,
+                 max_step: float = 0.035) -> None:
+        self.ok = False
+        self.cx = 0.5
+        self.cy = 0.5
+        self.tx = 0.5
+        self.ty = 0.5
+        self.cadence = max(1, cadence)
+        self.smooth = smooth
+        self.max_step = max_step
+        self.frames = 0
+        self.hits = 0
+        self.misses = 0
+        self.detections = 0
+        try:
+            import cv2
+
+            self.cv2 = cv2
+            model = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            self.cascade = cv2.CascadeClassifier(model)
+            self.ok = not self.cascade.empty()
+        except Exception as exc:
+            print(f"      rastreio de rosto indisponivel ({exc}) - usando centro")
+            return
+        if not self.ok:
+            print("      rastreio de rosto indisponivel - usando centro")
+
+    def _detect(self, rgb: Image.Image) -> None:
+        width = 320
+        small = rgb.resize((width, max(1, int(rgb.height * width / rgb.width))),
+                           Image.BILINEAR).convert("L")
+        gray = np.array(small)
+        faces = self.cascade.detectMultiScale(
+            gray, scaleFactor=1.15, minNeighbors=6, minSize=(30, 30)
+        )
+        if len(faces) == 0:
+            self.misses += 1
+            # video sem rosto (tela, paisagem, maos): para de tentar depois de um tempo
+            if self.hits == 0 and self.misses > 90:
+                self.ok = False
+                print("      nenhum rosto encontrado - mantendo enquadramento central")
+            return
+        self.hits += 1
+        self.misses = 0
+        x, y, w, h = max(faces, key=lambda f: int(f[2]) * int(f[3]))
+        self.detections += 1
+        self.tx = clamp01((x + w / 2) / gray.shape[1])
+        # rosto um pouco acima do centro (regra dos tercos)
+        self.ty = clamp01((y + h / 2) / gray.shape[0] - 0.03)
+
+    def reset(self) -> None:
+        self.cx = self.cy = self.tx = self.ty = 0.5
+        self.frames = self.hits = self.misses = 0
+
+    def _follow(self, cur: float, tgt: float) -> float:
+        delta = (tgt - cur) * self.smooth
+        delta = max(-self.max_step, min(self.max_step, delta))
+        return clamp01(cur + delta)
+
+    def step(self, rgb: Image.Image) -> tuple[float, float]:
+        if not self.ok:
+            return 0.5, 0.5
+        self.frames += 1
+        if self.frames % self.cadence == 1:
+            self._detect(rgb)
+
+        self.cx = self._follow(self.cx, self.tx)
+        self.cy = self._follow(self.cy, self.ty)
+
+        # se perdemos o rosto, fica parado onde estava (nao pula pro centro)
+        return self.cx, self.cy
 
 
 # --------------------------------------------------------------------------
@@ -473,10 +562,13 @@ def render(
     seek: bool = False,
     label: str = "",
     hook: Cue | None = None,
+    tracker: "FaceTracker | None" = None,
 ) -> None:
     painter = CaptionPainter(out_w, out_h, font_size=font_size,
                              font_path=font_path, box=box, hook=hook)
     painter.reset()
+    if tracker is not None:
+        tracker.reset()
 
     total_out = sum(s.dur for s in segments)
     total_frames = max(1, int(total_out * fps))
@@ -543,7 +635,11 @@ def render(
                 continue
 
             img = Image.fromarray(frame.to_ndarray(format="rgb24"))
-            img = reframe_frame(img, out_w, out_h, reframe, crop_x)
+            if tracker is not None:
+                fx, fy = tracker.step(img)
+                img = reframe_frame(img, out_w, out_h, reframe, fx, fy)
+            else:
+                img = reframe_frame(img, out_w, out_h, reframe, crop_x)
             img = painter.paint(img, src_t, cues)
 
             new = av.VideoFrame.from_ndarray(np.asarray(img), format="rgb24")
@@ -603,7 +699,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lead", type=float, default=0.12, help="respiro antes da fala")
     p.add_argument("--tail", type=float, default=0.18, help="respiro depois da fala")
     p.add_argument("-w", "--words", type=int, default=2, help="palavras por linha")
-    p.add_argument("--reframe", choices=["crop", "blur", "fit"], default="crop")
+    p.add_argument("--reframe", choices=["crop", "blur", "fit", "face"], default="crop")
     p.add_argument("--crop-x", type=float, default=0.5,
                    help="0 = esquerda, 1 = direita (modo crop)")
     p.add_argument("--height", type=int, default=1920, help="altura da saida 9:16")
@@ -683,6 +779,8 @@ def main(argv: list[str] | None = None) -> int:
           f"({100 - total_out * 100 / max(total_in, 0.01):.0f}% de silencio removido)")
     print(f"  saida {out_w}x{out_h} @ {args.fps:.0f}fps\n")
 
+    tracker = FaceTracker() if args.reframe == "face" else None
+
     if not args.highlights:
         print(f"  arquivo -> {dst.name}\n")
         render(
@@ -691,6 +789,7 @@ def main(argv: list[str] | None = None) -> int:
             reframe=args.reframe, crop_x=args.crop_x,
             font_size=args.font_size or None, font_path=args.font,
             box=args.box, crf=args.crf, preset=args.preset,
+            tracker=tracker,
         )
         print(f"\nOK -> {dst}")
         return 0
@@ -768,6 +867,7 @@ def main(argv: list[str] | None = None) -> int:
             audio_cut=clip_audio, seek=idx > 1,
             label=f"clipe {idx}: ",
             hook=hook_cue,
+            tracker=tracker,
         )
         made.append(out_path)
         manifest.append({

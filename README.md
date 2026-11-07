@@ -63,6 +63,14 @@ gerar thumbnail em lote). As opções da janela ficam em `autoedit_config.json`.
 pip install faster-whisper "av==18.1.0" pillow
 ```
 
+Para o reframe com rastreio de rosto (`--reframe face`), opcional:
+
+```powershell
+pip install "opencv-python-headless<5"
+```
+
+Use a versão 4.x: o OpenCV 5 removeu o `CascadeClassifier` do Python.
+
 Não precisa ffmpeg no PATH — a decodificação usa PyAV, que vem na instalação.
 Na primeira execução o modelo do Whisper é baixado (~500 MB no `small`).
 
@@ -84,6 +92,7 @@ exporta MP4 pronto pra postar.
 ```powershell
 python autoedit.py video.mp4
 python autoedit.py video.mp4 --reframe blur      # fundo desfocado, frame inteiro
+python autoedit.py video.mp4 --reframe face      # crop segue o rosto (rosto fora do centro)
 python autoedit.py video.mp4 -w 1                # uma palavra por vez
 python autoedit.py video.mp4 --max-silence 0.25  # corta mais agressivo
 python autoedit.py video.mp4 --box               # caixa preta atrás do texto
@@ -96,7 +105,7 @@ Saída: `video_tiktok.mp4` (1080×1920, 30fps, H.264 + AAC 192k).
 | --- | --- | --- |
 | `--max-silence` | `0.35` | pausa maior que isso vira corte |
 | `--lead` / `--tail` | `0.12` / `0.18` | respiro antes/depois da fala |
-| `--reframe` | `crop` | `crop`, `blur` ou `fit` |
+| `--reframe` | `crop` | `crop`, `face`, `blur` ou `fit` |
 | `--crop-x` | `0.5` | desloca o corte horizontal (0 = esquerda) |
 | `--height` | `1920` | altura final; largura = 9/16 dela |
 | `--fps` | `30` | 60fps na fonte vira 30 na saída (sem duplicar frame) |
@@ -104,6 +113,12 @@ Saída: `video_tiktok.mp4` (1080×1920, 30fps, H.264 + AAC 192k).
 
 Não corta respiro no meio da palavra, não deixa legenda fora de sincronia: o
 corte e a legenda usam o mesmo mapa de tempo da fonte.
+
+**Reframe `face`**: detecta o rosto (Haar cascade que vem no OpenCV, sem baixar
+modelo), roda a detecção a cada 3 frames em uma miniatura de 320px e interpola o
+movimento — o crop acompanha sem tremor. Se não achar rosto nenhum, mantém o
+enquadramento central. Precisa de `pip install opencv-python-headless`; sem ele
+o modo cai no `crop` automaticamente.
 
 Custo: ~1,2x a duração do vídeo na CPU (20s de vídeo ≈ 25s de render).
 
